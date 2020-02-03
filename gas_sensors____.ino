@@ -1,3 +1,4 @@
+Dinakaran Jio, [03.02.20 18:28]
 #include "esp32-mqtt.h"
 #include <DHT.h>;
 #include "ArduinoJson.h"
@@ -22,12 +23,35 @@ char charBuf[150] ;
 #define         READ_SAMPLE_TIMES            (5)     //define the time interal(in milisecond) between each samples in
                                                      //normal operation
 
+
+#define         MG_PIN                       (0)     //define which analog input channel you are going to use
+#define         BOOL_PIN                     (2)
+#define         DC_GAIN                      (8.5)   //define the DC gain of amplifier
+
+#define         ZERO_POINT_VOLTAGE           (0.220) //define the output of the sensor in volts when the concentration of CO2 is 400PPM
+#define         REACTION_VOLTGAE             (0.020) //define the voltage drop of the sensor when move the sensor from air into 1000ppm CO2
+ 
+/*****************************Globals***********************************************/
+float           CO2Curve[3]  =  {2.602,ZERO_POINT_VOLTAGE,(REACTION_VOLTGAE/(2.602-3))};   
+                                                     //two points are taken from the curve. 
+                                                     //with these two points, a line is formed which is
+                                                     //"approximately equivalent" to the original curve.
+                                                     //data format:{ x, y, slope}; point1: (lg400, 0.324), point2: (lg4000, 0.280) 
+                                                     //slope = ( reaction voltage ) / (log400 –log1000) 
+
+
+
+
+
+
 /**********************Application Related Macros**********************************/
 #define         GAS_H2                      (1)
 
 /*****************************Globals***********************************************/
 float           H2Curve[3]  =  {2.3, 0.93,-1.44};    //two points are taken from the curve in datasheet.
-                                                     //data format:{ x, y, slope}; point1: (lg200, lg8.5), point2: (lg10000, lg0.03)
+                                                     //data format:{ x, y, slope}; point1: (lg200,lg8.5), point2: (lg10000, lg0.03)
+float           COCurve[3]  =  {2.3, 0.23, -0.49};    //two points are taken from the curve in datasheet.
+                                                     //data format:{ x, y, slope}; point1: (lg200,lg1.7), point2: (lg1000, lg0.78)
 
 float           Ro           =  10;                  //Ro is initialized to 10 kilo ohms
 
@@ -49,6 +73,16 @@ void setup() {
   Serial.print(Ro);
   Serial.print("kohm");
   Serial.print("\n");
+    
+
+
+    pinMode(BOOL_PIN, INPUT);                        //set
+
+Dinakaran Jio, [03.02.20 18:28]
+pin to input
+    digitalWrite(BOOL_PIN, HIGH);                    //turn on pullup resistors
+ 
+    Serial.print("MG-811 Demostration\n");                
     
 
   
@@ -80,6 +114,7 @@ Serial.print("H2:");
    Serial.print("\n");
    delay(200);
    doc["H2"] = MQGetGasPercentage(MQRead(MQ_PIN)/Ro,GAS_H2);
+   doc["co"] = MQGetGasPercentage(string co(),GAS_co);
    delay(1000);
 
 
@@ -178,6 +213,10 @@ float MQRead(int mq_pin)
     Serial.println("H2");
     
      return String(MQGetPercentage(rs_ro_ratio,H2Curve));
+    else 
+      Serial.println("CO");
+    
+     return String(MQGetPercentage(rs_ro_ratio,COCurve));
   } 
    
      
@@ -188,4 +227,105 @@ float MQRead(int mq_pin)
 int  MQGetPercentage(float rs_ro_ratio, float *pcurve)
 {
   return (pow(10,( ((log(rs_ro_ratio)-pcurve[1])/pcurve[2]) + pcurve[0])));
+}
+string co2()
+{
+
+
+
+ int percentage;
+    float volts;
+ 
+    volts = MGRead(MG_PIN);
+    Serial.print( "SEN-00007:" );
+    Serial.print(volts); 
+    Serial.print( "V           " );
+ 
+    percentage = MGGetPercentage(volts,CO2Curve);
+    Serial.print("CO2:");
+    if (percentage == -1) {
+        Serial.print( "<400" );
+    } else {
+        Serial.print(percentage);
+    }
+ 
+    Serial.print( "ppm" );  
+    Serial.print("\n");
+ 
+    if (digitalRead(BOOL_PIN) ){
+        Serial.print( "=====BOOL is HIGH======" );
+    } else {
+        Serial.print( "=====BOOL is LOW======" )
+
+Dinakaran Jio, [03.02.20 18:28]
+;
+    }
+ 
+    Serial.print("\n");
+ 
+    delay(200);
+  return string percentage;
+}
+
+
+/*****************************  MGRead *****************************************
+Input:   mg_pin - analog channel
+Output:  output of SEN-000007
+Remarks: This function reads the output of SEN-000007
+************************************************************************************/ 
+float MGRead(int mg_pin)
+{
+    int i;
+    float v=0;
+ 
+    for (i=0;i<READ_SAMPLE_TIMES;i++) {
+        v += analogRead(mg_pin);
+        delay(READ_SAMPLE_INTERVAL);
+    }
+    v = (v/READ_SAMPLE_TIMES) *5/1024 ;
+    return v;  
+}
+ 
+/*****************************  MQGetPercentage ******************************
+Input:   volts   - SEN-000007 output measured in volts
+         pcurve  - pointer to the curve of the target gas
+Output:  ppm of the target gas
+Remarks: By using the slope and a point of the line. The x(logarithmic value of ppm) 
+         of the line could be derived if y(MG-811 output) is provided. As it is a 
+         logarithmic coordinate, power of 10 is used to convert the result to non-logarithmic 
+         value.
+************************************************************************************/ 
+int  MGGetPercentage(float volts, float *pcurve)
+{
+   if ((volts/DC_GAIN )>=ZERO_POINT_VOLTAGE) {
+      return -1;
+   } else { 
+      return pow(10, ((volts/DC_GAIN)-pcurve[1])/pcurve[2]+pcurve[0]);
+   }
+}
+string CO()
+{  
+float sensor_volt;
+    float RS_gas; // Get value of RS in a GAS
+    float ratio; // Get ratio RS_GAS/RS_air
+    int sensorValue = analogRead(A0);
+    sensor_volt=(float)sensorValue/1024*5.0;
+    RS_gas = (5.0-sensor_volt)/sensor_volt; // omit *RL
+
+          /*-Replace the name "R0" with the value of R0 in the demo of First Test -*/
+    ratio = RS_gas/R0;  // ratio = RS/R0
+          /*-----------------------------------------------------------------------*/
+
+    Serial.print("sensor_volt = ");
+    Serial.println(sensor_volt);
+    Serial.print("RS_ratio = ");
+    Serial.println(RS_gas);
+    Serial.print("Rs/R0 = ");
+    Serial.println(ratio);
+
+    Serial.print("\n\n");
+
+    delay(1000);
+    return string(ratio);
+
 }
